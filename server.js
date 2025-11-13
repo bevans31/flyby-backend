@@ -1,99 +1,162 @@
-// server.js
+// server.js — Clean, stable Amadeus flight flattening backend (ESM)
+
 import express from "express";
-import fetch from "node-fetch";
 import cors from "cors";
 import dotenv from "dotenv";
+import fetch from "node-fetch";
 
 dotenv.config();
 
-const app = express();
-app.use(cors());
+// ENV
+const CLIENT_ID = process.env.AMADEUS_API_KEY;
+const CLIENT_SECRET = process.env.AMADEUS_API_SECRET;
+const PORT = process.env.PORT || 3000;
+const AMADEUS_BASE = "https://test.api.amadeus.com";
 
-// ---- Amadeus API Setup ---- //
-// force TEST base unless you explicitly override it
-const AMADEUS_BASE =
-  process.env.AMADEUS_BASE?.trim() || "https://test.api.amadeus.com";
-
-const AMADEUS_CLIENT_ID = process.env.AMADEUS_CLIENT_ID;
-const AMADEUS_CLIENT_SECRET = process.env.AMADEUS_CLIENT_SECRET;
-
-if (!AMADEUS_CLIENT_ID || !AMADEUS_CLIENT_SECRET) {
-  console.warn("⚠️ Missing AMADEUS_CLIENT_ID or AMADEUS_CLIENT_SECRET in .env");
+// Sanity check
+if (!CLIENT_ID || !CLIENT_SECRET) {
+  console.error("❌ Missing AMADEUS_API_KEY or AMADEUS_API_SECRET in .env");
+  process.exit(1);
 }
 
-// get access token (no caching for now — fine while we test)
-async function getAmadeusToken() {
-  const response = await fetch(`${AMADEUS_BASE}/v1/security/oauth2/token`, {
+// Airline fallback names
+const AIRLINE_MAP = {
+  NK: "Spirit Airlines",
+  F9: "Frontier Airlines",
+  DL: "Delta Air Lines",
+  AA: "American Airlines",
+  UA: "United Airlines",
+  WN: "Southwest Airlines",
+  AS: "Alaska Airlines",
+  B6: "JetBlue",
+  SY: "Sun Country Airlines"
+};
+
+// Token cache
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getToken() {
+  const now = Math.floor(Date.now() / 1000);
+
+  if (cachedToken && now < tokenExpiry - 30) {
+    return cachedToken;
+  }
+
+  const res = await fetch(`${AMADEUS_BASE}/v1/security/oauth2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "client_credentials",
-      client_id: AMADEUS_CLIENT_ID,
-      client_secret: AMADEUS_CLIENT_SECRET,
-    }),
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET
+    })
   });
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error("❌ Amadeus token error:", data);
-    throw new Error("Failed to get Amadeus token");
+  if (!res.ok) {
+    throw new Error("❌ Amadeus authentication failed");
   }
 
-  return data.access_token;
+  const json = await res.json();
+  cachedToken = json.access_token;
+  tokenExpiry = Math.floor(Date.now() / 1000) + json.expires_in;
+
+  return cachedToken;
 }
 
-// simple health
+// Express setup
+const app = express();
+app.use(cors());
+app.use(express.json());
+
 app.get("/", (req, res) => {
   res.json({
     ok: true,
-    amadeus_base: AMADEUS_BASE,
     endpoint: "/amadeus/flights",
+    env: {
+      CLIENT_ID_present: !!CLIENT_ID,
+      CLIENT_SECRET_present: !!CLIENT_SECRET
+    }
   });
 });
 
-// ---- Available Flights ---- //
+// MAIN FLIGHT ROUTE
 app.get("/amadeus/flights", async (req, res) => {
-  const { origin, destination, date } = req.query;
-
-  if (!origin || !destination || !date) {
-    return res.status(400).json({
-      error: "Missing required parameters: origin, destination, date",
-    });
-  }
-
   try {
-    const token = await getAmadeusToken();
+    const { origin, destination, date, currency = "USD", max = "5", include } = req.query;
 
-    // ✅ use v2, not v1
-    const url = new URL(`${AMADEUS_BASE}/v2/shopping/flight-offers`);
-    url.searchParams.set("originLocationCode", origin);
-    url.searchParams.set("destinationLocationCode", destination);
-    url.searchParams.set("departureDate", date);
-    url.searchParams.set("adults", "1");
-    url.searchParams.set("max", "5");
-
-    const response = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    const data = await response.json();
-
-    // if Amadeus says “no apiproduct match found”, forward that so we know
-    if (!response.ok) {
-      console.error("❌ Amadeus flight error:", data);
-      return res.status(response.status).json(data);
+    if (!origin || !destination || !date) {
+      return res.status(400).json({ error: "Missing origin, destination, or date" });
     }
 
-    // success
-    return res.json(data);
-  } catch (error) {
-    console.error("Error fetching Amadeus data:", error);
-    return res.status(500).json({ error: "Server error" });
+    const token = await getToken();
+
+    // Build Amadeus URL
+    const url = new URL(`${AMADEUS_BASE}/v2/shopping/flight-offers`);
+    url.searchParams.set("originLocationCode", origin.toUpperCase());
+    url.searchParams.set("destinationLocationCode", destination.toUpperCase());
+    url.searchParams.set("departureDate", date);
+    url.searchParams.set("adults", "1");
+    url.searchParams.set("max", max);
+    url.searchParams.set("currencyCode", currency.toUpperCase());
+
+    if (include) {
+      url.searchParams.set("includedAirlineCodes", include.toUpperCase());
+    }
+
+    // Call Amadeus
+    const amadeusRes = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!amadeusRes.ok) {
+      return res.status(amadeusRes.status).json({
+        error: "Amadeus returned an error",
+        detail: await amadeusRes.text()
+      });
+    }
+
+    const raw = await amadeusRes.json();
+
+    const carriers = raw.dictionaries?.carriers || {};
+    const offers = raw.data || [];
+
+    const flights = offers.map(offer => {
+      const seg = offer.itineraries?.[0]?.segments || [];
+      const first = seg[0] || {};
+      const last = seg[seg.length - 1] || {};
+
+      const dep = first.departure || {};
+      const arr = last.arrival || {};
+
+      const carrier = first.carrierCode || offer.validatingAirlineCodes?.[0] || "";
+      const airlineName = carriers[carrier] || AIRLINE_MAP[carrier] || carrier;
+
+      return {
+        id: offer.id || `${carrier}_${first.number}_${dep.iataCode}_${arr.iataCode}`,
+        airline: carrier,
+        airlineName,
+        flightNumber: `${carrier}${first.number}`,
+        departureIATA: dep.iataCode || "",
+        arrivalIATA: arr.iataCode || "",
+        departureTime: dep.at || null,
+        arrivalTime: arr.at || null,
+        price: offer.price?.total ? `${currency} ${offer.price.total}` : null
+      };
+    });
+
+    res.json({
+      count: flights.length,
+      flights
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: "Server error",
+      detail: err.message
+    });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`✅ FlyBY backend running on http://localhost:${PORT}`)
-);
+app.listen(PORT, () => {
+  console.log(`🚀 Backend running on port ${PORT}`);
+});
