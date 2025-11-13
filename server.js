@@ -8,8 +8,8 @@ import fetch from "node-fetch";
 dotenv.config();
 
 // ENV
-const CLIENT_ID = process.env.AMADEUS_API_KEY;
-const CLIENT_SECRET = process.env.AMADEUS_API_SECRET;
+const CLIENT_ID = process.env.AMADEUS_CLIENT_ID;
+const CLIENT_SECRET = process.env.AMADEUS_CLIENT_SECRET;
 const PORT = process.env.PORT || 3000;
 const AMADEUS_BASE = "https://test.api.amadeus.com";
 
