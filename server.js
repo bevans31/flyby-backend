@@ -81,9 +81,17 @@ app.get("/", (req, res) => {
 });
 
 // MAIN FLIGHT ROUTE
+// MAIN FLIGHT ROUTE
 app.get("/amadeus/flights", async (req, res) => {
   try {
-    const { origin, destination, date, currency = "USD", max = "5", include } = req.query;
+    const {
+      origin,
+      destination,
+      date,
+      currency = "USD",
+      max,            // raw query param from client (optional)
+      include
+    } = req.query;
 
     if (!origin || !destination || !date) {
       return res.status(400).json({ error: "Missing origin, destination, or date" });
@@ -91,13 +99,19 @@ app.get("/amadeus/flights", async (req, res) => {
 
     const token = await getToken();
 
+    // Decide how many offers to ask Amadeus for:
+    // - If client passes &max=, use that
+    // - Otherwise default to 20 instead of 5
+    // - Clamp to at most 50 to avoid huge responses
+    const maxSafe = Math.min(parseInt(max || "20", 10) || 20, 50).toString();
+
     // Build Amadeus URL
     const url = new URL(`${AMADEUS_BASE}/v2/shopping/flight-offers`);
     url.searchParams.set("originLocationCode", origin.toUpperCase());
     url.searchParams.set("destinationLocationCode", destination.toUpperCase());
     url.searchParams.set("departureDate", date);
     url.searchParams.set("adults", "1");
-    url.searchParams.set("max", max);
+    url.searchParams.set("max", maxSafe);
     url.searchParams.set("currencyCode", currency.toUpperCase());
 
     if (include) {
@@ -156,6 +170,7 @@ app.get("/amadeus/flights", async (req, res) => {
     });
   }
 });
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend running on port ${PORT}`);
