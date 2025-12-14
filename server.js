@@ -11,7 +11,7 @@ dotenv.config();
 const CLIENT_ID = process.env.AMADEUS_CLIENT_ID;
 const CLIENT_SECRET = process.env.AMADEUS_CLIENT_SECRET;
 const PORT = process.env.PORT || 3000;
-const AMADEUS_BASE = "https://test.api.amadeus.com";
+const AMADEUS_BASE = "https://.api.amadeus.com";
 
 // Sanity check
 if (!CLIENT_ID || !CLIENT_SECRET) {
