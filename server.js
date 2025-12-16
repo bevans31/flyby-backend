@@ -216,9 +216,14 @@ app.get('/amadeus/flights', async (req, res) => {
       if (!SERPAPI_KEY) {
         return res.status(500).json({ error: 'SerpApi key missing', detail: 'Set SERPAPI_KEY environment variable or change FLYBY_PROVIDER' });
       }
-      const serpJson = await searchSerpApi({ origin, destination, date, returnDate, currency: safeCurrency });
-      const flights = flattenSerpApi(serpJson, safeCurrency, maxNum, includeSet);
-      return res.json({ count: flights.length, flights });
+const serpJson = await searchSerpApi({ origin, destination, date, returnDate, currency: safeCurrency });
+const flights = flattenSerpApi(serpJson, safeCurrency, maxNum, includeSet);
+
+// ✅ this is the prefilled Google Flights link
+const googleFlightsUrl = serpJson?.search_metadata?.google_flights_url || null;
+
+return res.json({ count: flights.length, googleFlightsUrl, flights });
+
     } else {
       return res.status(500).json({ error: `Unknown provider '${PROVIDER}'` });
     }
