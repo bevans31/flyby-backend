@@ -66,13 +66,16 @@ async function searchFlightsSerpApi({
 // -----------------------------
 // 2) Booking Options (SerpApi)
 //    Uses booking_token from flight result
+//    IMPORTANT: SerpAPI requires departure_id & arrival_id even with booking_token
 // -----------------------------
-async function fetchBookingFromSerpApi({ bookingToken, currency }) {
+async function fetchBookingFromSerpApi({ bookingToken, currency, departureId, arrivalId }) {
   const url = new URL("https://serpapi.com/search.json");
 
   url.searchParams.set("engine", "google_flights");
   url.searchParams.set("api_key", SERPAPI_KEY);
-  url.searchParams.set("booking_token", bookingToken); // ✅ deep-link flow
+  url.searchParams.set("booking_token", bookingToken);
+  url.searchParams.set("departure_id", departureId.toUpperCase());  // ✅ Required
+  url.searchParams.set("arrival_id", arrivalId.toUpperCase());      // ✅ Required
   url.searchParams.set("currency", currency.toUpperCase());
   url.searchParams.set("gl", SERPAPI_GL);
   url.searchParams.set("hl", SERPAPI_HL);
@@ -186,23 +189,33 @@ app.get("/serpapi/flights", async (req, res) => {
 
 // -----------------------------
 // Deep-link booking endpoint
-// GET /serpapi/booking?token=BOOKING_TOKEN&currency=USD
+// GET /serpapi/booking?token=BOOKING_TOKEN&currency=USD&origin=DTW&destination=LAX
 // This returns a googleFlightsUrl that is tied to the selected flight,
 // plus booking options (links) if present.
+// IMPORTANT: SerpAPI requires origin/destination even with booking_token
 // -----------------------------
 app.get("/serpapi/booking", async (req, res) => {
   try {
-    const { token, currency = "USD" } = req.query;
+    const { token, currency = "USD", origin, destination } = req.query;
 
     if (!token) {
       return res.status(400).json({ error: "Missing token (bookingToken)" });
+    }
+
+    if (!origin || !destination) {
+      return res.status(400).json({ 
+        error: "Missing required params", 
+        required: ["token", "origin", "destination"] 
+      });
     }
 
     const safeCurrency = String(currency).toUpperCase();
 
     const bookingJson = await fetchBookingFromSerpApi({
       bookingToken: String(token),
-      currency: safeCurrency
+      currency: safeCurrency,
+      departureId: String(origin),
+      arrivalId: String(destination)
     });
 
     const googleFlightsUrl = bookingJson?.search_metadata?.google_flights_url || null;
