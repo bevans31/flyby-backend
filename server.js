@@ -91,7 +91,28 @@ async function fetchBookingFromSerpApi({ bookingToken, currency, departureId, ar
 // -----------------------------
 // Flatten flights into your app's shape
 // Adds: bookingToken
+// Clean all string data to remove encoding errors
 // -----------------------------
+
+// Helper function to clean bad characters
+function cleanString(str) {
+  if (!str) return null;
+  
+  // Remove common encoding errors
+  let cleaned = String(str)
+    .replace(/â€"/g, '-')      // em-dash
+    .replace(/â€¢/g, '-')      // bullet
+    .replace(/â€™/g, "'")      // smart quote
+    .replace(/â€œ/g, '"')      // smart quote
+    .replace(/â€/g, '"')       // smart quote
+    .replace(/Â /g, ' ')       // non-breaking space
+    .replace(/â†'/g, 'to')     // arrow
+    .replace(/[^\x20-\x7E]/g, '') // Remove all non-ASCII
+    .trim();
+  
+  return cleaned || null;
+}
+
 function flattenFlights(serpJson, currency, max = 20) {
   const raw = [];
   if (Array.isArray(serpJson.best_flights)) raw.push(...serpJson.best_flights);
@@ -106,17 +127,21 @@ function flattenFlights(serpJson, currency, max = 20) {
 
     const airline = (first.airline || "").toUpperCase();
     const flightNum = first.flight_number ? String(first.flight_number) : "";
+    
+    // Clean the time strings - this is where encoding errors come from
+    const depTime = cleanString(first.departure_airport?.time);
+    const arrTime = cleanString(last.arrival_airport?.time);
 
     return {
       id: f.booking_token || `flight_${idx}`,
-      bookingToken: f.booking_token || null, // ✅ NEW: required for deep link
+      bookingToken: f.booking_token || null,
       airline: airline,
       airlineName: airline,
       flightNumber: airline && flightNum ? `${airline}${flightNum}` : flightNum,
       departureIATA: first.departure_airport?.id || "",
       arrivalIATA: last.arrival_airport?.id || "",
-      departureTime: first.departure_airport?.time || null,
-      arrivalTime: last.arrival_airport?.time || null,
+      departureTime: depTime,
+      arrivalTime: arrTime,
       price: f.price ? `${currency.toUpperCase()} ${f.price}` : null
     };
   });
