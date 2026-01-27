@@ -1,7 +1,7 @@
-// FlyBY Backend — SerpApi (Google Flights) only
+// FlyBY Backend - SerpApi (Google Flights) only
 // Supports: one-way + round-trip search
 // Returns: flights[] + googleFlightsUrl + priceHistory
-// Adds: bookingToken per flight + /amadeus/booking endpoint for deep-linking
+// Adds: bookingToken per flight + /serpapi/booking endpoint for deep-linking
 
 import express from "express";
 import cors from "cors";
@@ -86,7 +86,7 @@ async function fetchBookingFromSerpApi({ bookingToken, currency }) {
 }
 
 // -----------------------------
-// Flatten flights into your app’s shape
+// Flatten flights into your app's shape
 // Adds: bookingToken
 // -----------------------------
 function flattenFlights(serpJson, currency, max = 20) {
@@ -126,16 +126,16 @@ app.get("/", (req, res) => {
   res.json({
     ok: true,
     provider: "serpapi",
-    endpoints: ["/amadeus/flights", "/amadeus/booking"],
+    endpoints: ["/serpapi/flights", "/serpapi/booking"],
     env: { SERPAPI_KEY_present: !!SERPAPI_KEY }
   });
 });
 
 // -----------------------------
 // Main flight search endpoint
-// GET /amadeus/flights?origin=DTW&destination=ATL&date=2026-03-10&returnDate=...
+// GET /serpapi/flights?origin=DTW&destination=ATL&date=2026-03-10&returnDate=...
 // -----------------------------
-app.get("/amadeus/flights", async (req, res) => {
+app.get("/serpapi/flights", async (req, res) => {
   try {
     const {
       origin,
@@ -186,11 +186,11 @@ app.get("/amadeus/flights", async (req, res) => {
 
 // -----------------------------
 // Deep-link booking endpoint
-// GET /amadeus/booking?token=BOOKING_TOKEN&currency=USD
+// GET /serpapi/booking?token=BOOKING_TOKEN&currency=USD
 // This returns a googleFlightsUrl that is tied to the selected flight,
 // plus booking options (links) if present.
 // -----------------------------
-app.get("/amadeus/booking", async (req, res) => {
+app.get("/serpapi/booking", async (req, res) => {
   try {
     const { token, currency = "USD" } = req.query;
 
